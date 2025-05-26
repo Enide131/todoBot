@@ -2,7 +2,7 @@ const { Telegraf } = require('telegraf');
 const dayjs = require('dayjs');
 const customParseFormat = require('dayjs/plugin/customParseFormat');
 dayjs.extend(customParseFormat);
-const BOT_TOKEN = '7472867260:AAGlhi8WbKtjCts1vmHDwRybeU1CNredA24'
+const BOT_TOKEN = process.env.BOT_TOKEN;
 
 const bot = new Telegraf(BOT_TOKEN);
 
@@ -10,19 +10,29 @@ const tasks = {};
 
 function scheduleTask(userId, task) {
   const delay = task.time.diff(dayjs());
+
+  console.log(`Планируем задачу "${task.text}" через ${delay} мс (${task.time.format('DD.MM.YYYY HH:mm')})`);
+
   if (delay <= 0) {
-    bot.telegram.sendMessage(userId, `Задача "${task.text}" наступила!`);
+    bot.telegram.sendMessage(userId, `⏰ Задача "${task.text}" наступила!`)
+      .catch(err => console.error('Ошибка при немедленной отправке:', err));
     return;
   }
-  task.timer = setTimeout(() => {
-    bot.telegram.sendMessage(userId, `⏰ Задача "${task.text}" наступила!`);
+
+  task.timer = setTimeout(async () => {
+    try {
+      console.log(`Отправка сообщения для задачи "${task.text}" через ${delay} мс`);
+      await bot.telegram.sendMessage(userId, `⏰ Задача "${task.text}" наступила!`);
+      console.log(`Отправлено уведомление для задачи "${task.text}"`);
+    } catch (err) {
+      console.error(`Ошибка при отправке задачи "${task.text}" пользователю ${userId}:`, err);
+    }
+
+    // Удаляем задачу
     tasks[userId] = tasks[userId].filter(t => t.id !== task.id);
   }, delay);
 }
 
-bot.start((ctx) => ctx.reply(
-  `Привет! Я твой планировщик задач.\n\nКоманды:\n/add Задача | ДД.ММ.ГГГГ ЧЧ:ММ - добавить задачу\n/list - список задач\n/del ID - удалить задачу`
-));
 
 bot.command('add', (ctx) => {
   const userId = ctx.from.id;
