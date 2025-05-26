@@ -29,7 +29,6 @@ function scheduleTask(userId, task)
       console.error(`Ошибка при отправке задачи "${task.text}" пользователю ${userId}:`, err);
     }
 
-    // Удаляем задачу
     tasks[userId] = tasks[userId].filter(t => t.id !== task.id);
   }, delay);
 }
