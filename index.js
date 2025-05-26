@@ -9,7 +9,9 @@ const bot = new Telegraf(BOT_TOKEN);
 const tasks = {};
 
 function scheduleTask(userId, task) {
-  const delay = task.time.diff(dayjs());
+  const nowUtc = dayjs.utc();
+  const delay = time.utc().diff(nowUtc);
+
 
   console.log(`Планируем задачу "${task.text}" через ${delay} мс (${task.time.format('DD.MM.YYYY HH:mm')})`);
 
