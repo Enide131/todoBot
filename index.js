@@ -1,8 +1,6 @@
 const { Telegraf } = require('telegraf');
 const dayjs = require('dayjs');
-const utc = require('dayjs/plugin/utc');
 const customParseFormat = require('dayjs/plugin/customParseFormat');
-dayjs.extend(utc);  
 dayjs.extend(customParseFormat);
 const BOT_TOKEN = process.env.BOT_TOKEN;
 
@@ -10,10 +8,9 @@ const bot = new Telegraf(BOT_TOKEN);
 
 const tasks = {};
 
-function scheduleTask(userId, task) {
-  const nowUtc = dayjs.utc();
-  const delay = time.utc().diff(nowUtc);
-
+function scheduleTask(userId, task) 
+{
+  const delay = task.time.diff(dayjs()) - 2 * 60 * 60 * 1000;
 
   console.log(`Планируем задачу "${task.text}" через ${delay} мс (${task.time.format('DD.MM.YYYY HH:mm')})`);
 
