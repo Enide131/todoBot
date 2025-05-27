@@ -1,4 +1,3 @@
-require('dotenv').config();
 const { Telegraf } = require('telegraf');
 const dayjs = require('dayjs');
 const customParseFormat = require('dayjs/plugin/customParseFormat');
@@ -40,6 +39,10 @@ function scheduleTask(userId, task) {
   }, delay);
 }
 
+bot.command('start', (ctx) => {
+  ctx.reply('Привет! Я бот для управления задачами. Используй /add для добавления задачи, /list для просмотра и /del для удаления.'); 
+});
+
 bot.command('add', async (ctx) => {
   const userId = ctx.from.id;
   const input = ctx.message.text.replace('/add ', '').trim();
@@ -51,18 +54,31 @@ bot.command('add', async (ctx) => {
   const time = dayjs(timeStr, 'DD.MM.YYYY HH:mm');
   if (!time.isValid()) return ctx.reply('Неверная дата/время. Используй формат ДД.MM.ГГГГ ЧЧ:ММ');
 
-  const result = await db.query(
-    'INSERT INTO tasks(user_id, text, time) VALUES ($1, $2, $3) RETURNING id',
-    [userId, text, time.toDate()]
+  const idRes = await db.query(`
+    SELECT id FROM generate_series(1, 10000) id
+    WHERE id NOT IN (
+      SELECT id FROM tasks WHERE user_id = $1
+    )
+    LIMIT 1;
+  `, [userId]);
+
+  if (idRes.rows.length === 0) return ctx.reply('Не удалось найти свободный ID. Попробуй позже.');
+
+  const newId = idRes.rows[0].id;
+
+  await db.query(
+    'INSERT INTO tasks(id, user_id, text, time) VALUES ($1, $2, $3, $4)',
+    [newId, userId, text, time.toDate()]
   );
 
-  const task = { id: result.rows[0].id, text, time, timer: null };
+  const task = { id: newId, text, time, timer: null };
   if (!tasks[userId]) tasks[userId] = [];
   tasks[userId].push(task);
   scheduleTask(userId, task);
 
-  ctx.reply(`Задача добавлена с ID ${task.id}:\n"${text}" на ${time.format('DD.MM.YYYY HH:mm')}`);
+  ctx.reply(`Задача добавлена с ID ${newId}:\n"${text}" на ${time.format('DD.MM.YYYY HH:mm')}`);
 });
+
 
 bot.command('list', async (ctx) => {
   const userId = ctx.from.id;
@@ -100,7 +116,6 @@ bot.command('del', async (ctx) => {
 bot.launch();
 console.log('Бот запущен');
 
-// Загружаем задачи при старте
 (async () => {
   try {
     const res = await db.query('SELECT id, user_id, text, time FROM tasks');
