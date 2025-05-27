@@ -54,28 +54,18 @@ bot.command('add', async (ctx) => {
   const time = dayjs(timeStr, 'DD.MM.YYYY HH:mm');
   if (!time.isValid()) return ctx.reply('Неверная дата/время. Используй формат ДД.MM.ГГГГ ЧЧ:ММ');
 
-  try {
-    // Получаем все ID текущего пользователя
-    const res = await db.query('SELECT id FROM tasks WHERE user_id = $1 ORDER BY id', [userId]);
-    const usedIds = res.rows.map(r => r.id);
+  const result = await db.query(
+    'INSERT INTO tasks(user_id, text, time) VALUES ($1, $2, $3) RETURNING id',
+    [userId, text, time.toDate()]
+  );
 
-    // Находим первую свободную позицию
-    let newId = 1;
-    while (usedIds.includes(newId)) newId++;
+  const task = { id: result.rows[0].id, text, time, timer: null };
+  if (!tasks[userId]) tasks[userId] = [];
+  tasks[userId].push(task);
+  scheduleTask(userId, task);
 
-    // Вставка с ручным id
-    await db.query(
-      'INSERT INTO tasks(id, user_id, text, time) VALUES ($1, $2, $3, $4)',
-      [newId, userId, text, time.toDate()]
-    );
-
-    ctx.reply(`Задача добавлена с ID ${newId}:\n"${text}" на ${time.format('DD.MM.YYYY HH:mm')}`);
-  } catch (err) {
-    console.error('Ошибка при добавлении задачи:', err);
-    ctx.reply('Произошла ошибка при добавлении задачи 😢');
-  }
+  ctx.reply(`Задача добавлена с ID ${task.id}:\n"${text}" на ${time.format('DD.MM.YYYY HH:mm')}`);
 });
-
 
 
 bot.command('list', async (ctx) => {
