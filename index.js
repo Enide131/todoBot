@@ -54,30 +54,28 @@ bot.command('add', async (ctx) => {
   const time = dayjs(timeStr, 'DD.MM.YYYY HH:mm');
   if (!time.isValid()) return ctx.reply('Неверная дата/время. Используй формат ДД.MM.ГГГГ ЧЧ:ММ');
 
-  const idRes = await db.query(`
-    SELECT id FROM generate_series(1, 10000) id
-    WHERE id NOT IN (
-      SELECT id FROM tasks WHERE user_id = $1
-    )
-    LIMIT 1;
-  `, [userId]);
+  try {
+    // Получаем все ID текущего пользователя
+    const res = await db.query('SELECT id FROM tasks WHERE user_id = $1 ORDER BY id', [userId]);
+    const usedIds = res.rows.map(r => r.id);
 
-  if (idRes.rows.length === 0) return ctx.reply('Не удалось найти свободный ID. Попробуй позже.');
+    // Находим первую свободную позицию
+    let newId = 1;
+    while (usedIds.includes(newId)) newId++;
 
-  const newId = idRes.rows[0].id;
+    // Вставка с ручным id
+    await db.query(
+      'INSERT INTO tasks(id, user_id, text, time) VALUES ($1, $2, $3, $4)',
+      [newId, userId, text, time.toDate()]
+    );
 
-  await db.query(
-    'INSERT INTO tasks(id, user_id, text, time) VALUES ($1, $2, $3, $4)',
-    [newId, userId, text, time.toDate()]
-  );
-
-  const task = { id: newId, text, time, timer: null };
-  if (!tasks[userId]) tasks[userId] = [];
-  tasks[userId].push(task);
-  scheduleTask(userId, task);
-
-  ctx.reply(`Задача добавлена с ID ${newId}:\n"${text}" на ${time.format('DD.MM.YYYY HH:mm')}`);
+    ctx.reply(`Задача добавлена с ID ${newId}:\n"${text}" на ${time.format('DD.MM.YYYY HH:mm')}`);
+  } catch (err) {
+    console.error('Ошибка при добавлении задачи:', err);
+    ctx.reply('Произошла ошибка при добавлении задачи 😢');
+  }
 });
+
 
 
 bot.command('list', async (ctx) => {
