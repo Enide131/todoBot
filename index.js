@@ -1,40 +1,46 @@
+require('dotenv').config();
 const { Telegraf } = require('telegraf');
 const dayjs = require('dayjs');
 const customParseFormat = require('dayjs/plugin/customParseFormat');
 dayjs.extend(customParseFormat);
-const BOT_TOKEN = process.env.BOT_TOKEN;
 
+const db = require('./db');
+const { Pool } = require('pg');
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
+const BOT_TOKEN = process.env.BOT_TOKEN;
 const bot = new Telegraf(BOT_TOKEN);
 
 const tasks = {};
 
-function scheduleTask(userId, task) 
-{
-  const delay = task.time.diff(dayjs()) - 2 * 60 * 60 * 1000;
-
-  console.log(`Планируем задачу "${task.text}" через ${delay} мс (${task.time.format('DD.MM.YYYY HH:mm')})`);
+function scheduleTask(userId, task) {
+  const delay = task.time.diff(dayjs()) - 2 * 60 * 60 * 1000; // вычтем 2 часа
 
   if (delay <= 0) {
-    bot.telegram.sendMessage(userId, `⏰ Задача "${task.text}" наступила!`)
-      .catch(err => console.error('Ошибка при немедленной отправке:', err));
+    console.log(`Пропущена просроченная задача "${task.text}"`);
     return;
   }
 
   task.timer = setTimeout(async () => {
     try {
-      console.log(`Отправка сообщения для задачи "${task.text}" через ${delay} мс`);
+      console.log(`Отправка уведомления: "${task.text}"`);
       await bot.telegram.sendMessage(userId, `⏰ Задача "${task.text}" наступила!`);
-      console.log(`Отправлено уведомление для задачи "${task.text}"`);
+
+      await pool.query('DELETE FROM tasks WHERE id = $1', [task.id]);
+      console.log(`Задача "${task.text}" удалена из базы`);
     } catch (err) {
-      console.error(`Ошибка при отправке задачи "${task.text}" пользователю ${userId}:`, err);
+      console.error(`Ошибка при отправке задачи "${task.text}":`, err);
     }
 
     tasks[userId] = tasks[userId].filter(t => t.id !== task.id);
   }, delay);
 }
 
-
-bot.command('add', (ctx) => {
+bot.command('add', async (ctx) => {
   const userId = ctx.from.id;
   const input = ctx.message.text.replace('/add ', '').trim();
   const parts = input.split('|');
@@ -42,35 +48,35 @@ bot.command('add', (ctx) => {
 
   const text = parts[0].trim();
   const timeStr = parts[1].trim();
-
   const time = dayjs(timeStr, 'DD.MM.YYYY HH:mm');
-if (!time.isValid()) return ctx.reply('Неверная дата/время. Используй формат ДД.MM.ГГГГ ЧЧ:ММ');
+  if (!time.isValid()) return ctx.reply('Неверная дата/время. Используй формат ДД.MM.ГГГГ ЧЧ:ММ');
 
+  const result = await db.query(
+    'INSERT INTO tasks(user_id, text, time) VALUES ($1, $2, $3) RETURNING id',
+    [userId, text, time.toDate()]
+  );
+
+  const task = { id: result.rows[0].id, text, time, timer: null };
   if (!tasks[userId]) tasks[userId] = [];
-
-  const id = tasks[userId].length ? tasks[userId][tasks[userId].length - 1].id + 1 : 1;
-
-  const task = { id, text, time, timer: null };
   tasks[userId].push(task);
-
   scheduleTask(userId, task);
 
-  ctx.reply(`Задача добавлена с ID ${id}:\n"${text}" на ${time.format('DD.MM.YYYY HH:mm')}`);
+  ctx.reply(`Задача добавлена с ID ${task.id}:\n"${text}" на ${time.format('DD.MM.YYYY HH:mm')}`);
 });
 
-bot.command('list', (ctx) => {
+bot.command('list', async (ctx) => {
   const userId = ctx.from.id;
-  const userTasks = tasks[userId];
-  if (!userTasks || userTasks.length === 0) return ctx.reply('Список задач пуст.');
+  const res = await db.query('SELECT id, text, time FROM tasks WHERE user_id = $1 ORDER BY time', [userId]);
+  if (res.rows.length === 0) return ctx.reply('Список задач пуст.');
 
   let msg = 'Твои задачи:\n';
-  userTasks.forEach(t => {
-    msg += `ID ${t.id}: "${t.text}" — ${t.time.format('DD.MM.YYYY HH:mm')}\n`;
+  res.rows.forEach(t => {
+    msg += `ID ${t.id}: "${t.text}" — ${dayjs(t.time).format('DD.MM.YYYY HH:mm')}\n`;
   });
   ctx.reply(msg);
 });
 
-bot.command('del', (ctx) => {
+bot.command('del', async (ctx) => {
   const userId = ctx.from.id;
   const args = ctx.message.text.split(' ');
   if (args.length !== 2) return ctx.reply('Используй: /del ID');
@@ -78,16 +84,51 @@ bot.command('del', (ctx) => {
   const id = Number(args[1]);
   if (isNaN(id)) return ctx.reply('ID должен быть числом.');
 
-  if (!tasks[userId]) return ctx.reply('Список задач пуст.');
+  await db.query('DELETE FROM tasks WHERE id = $1 AND user_id = $2', [id, userId]);
 
-  const taskIndex = tasks[userId].findIndex(t => t.id === id);
-  if (taskIndex === -1) return ctx.reply(`Задача с ID ${id} не найдена.`);
+  if (tasks[userId]) {
+    const i = tasks[userId].findIndex(t => t.id === id);
+    if (i !== -1) {
+      clearTimeout(tasks[userId][i].timer);
+      tasks[userId].splice(i, 1);
+    }
+  }
 
-  clearTimeout(tasks[userId][taskIndex].timer);
-  tasks[userId].splice(taskIndex, 1);
   ctx.reply(`Задача с ID ${id} удалена.`);
 });
 
 bot.launch();
-
 console.log('Бот запущен');
+
+// Загружаем задачи при старте
+(async () => {
+  try {
+    const res = await db.query('SELECT id, user_id, text, time FROM tasks');
+    const now = dayjs();
+
+    for (const row of res.rows) {
+      const taskTime = dayjs(row.time);
+
+      if (taskTime.isBefore(now)) {
+        console.log(`Удаление просроченной задачи "${row.text}" (ID ${row.id})`);
+        await db.query('DELETE FROM tasks WHERE id = $1', [row.id]);
+        continue;
+      }
+
+      const task = {
+        id: row.id,
+        text: row.text,
+        time: taskTime,
+        timer: null,
+      };
+
+      if (!tasks[row.user_id]) tasks[row.user_id] = [];
+      tasks[row.user_id].push(task);
+      scheduleTask(row.user_id, task);
+    }
+
+    console.log('Все актуальные задачи загружены');
+  } catch (err) {
+    console.error('Ошибка при загрузке задач:', err);
+  }
+})();
