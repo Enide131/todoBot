@@ -47,12 +47,32 @@ bot.command('add', async (ctx) => {
   const userId = ctx.from.id;
   const input = ctx.message.text.replace('/add ', '').trim();
   const parts = input.split('|');
-  if (parts.length !== 2) return ctx.reply('Неверный формат! Используй:\n/add Текст задачи | ДД.MM.ГГГГ ЧЧ:ММ');
+  if (parts.length !== 2) return ctx.reply('Неверный формат! Используй:\n/add Текст задачи | ДД.MM ЧЧ:ММ');
+
+
 
   const text = parts[0].trim();
-  const timeStr = parts[1].trim();
-  const time = dayjs(timeStr, 'DD.MM.YYYY HH:mm');
-  if (!time.isValid()) return ctx.reply('Неверная дата/время. Используй формат ДД.MM.ГГГГ ЧЧ:ММ');
+  const dateTimeStr = parts[1].trim();
+
+
+  const now = dayjs();
+  let time = dayjs(`${dateTimeStr} ${now.year()}`, 'DD.MM HH:mm YYYY');
+
+  if (dateTimeStr.includes(' ')) {
+  time = dayjs(`${dateTimeStr} ${now.year()}`, 'DD.MM HH:mm YYYY');
+  if (time.isValid() && time.isBefore(now)) {
+    time = time.add(1, 'year');
+  }
+} else {
+  time = dayjs(`${now.format('DD.MM.YYYY')} ${dateTimeStr}`, 'DD.MM.YYYY HH:mm');
+  if (time.isValid() && time.isBefore(now)) {
+    time = time.add(1, 'day');
+  }
+}
+
+  if (!time.isValid()) {
+    return ctx.reply('Неверная дата/время. Используй формат ДД.MM ЧЧ:ММ');
+  }
 
   const result = await db.query(
     'INSERT INTO tasks(user_id, text, time) VALUES ($1, $2, $3) RETURNING id',
@@ -66,6 +86,7 @@ bot.command('add', async (ctx) => {
 
   ctx.reply(`Задача добавлена с ID ${task.id}:\n"${text}" на ${time.format('DD.MM.YYYY HH:mm')}`);
 });
+
 
 
 bot.command('list', async (ctx) => {
