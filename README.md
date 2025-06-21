@@ -15,12 +15,12 @@ Store all data in a PostgreSQL database
 Automatically remove outdated tasks
 
 🧪 Example Commands
-bash
-Копіювати
-Редагувати
 /add Finish homework | 22.06 17:00
+
 /list
+
 /del 5
+
 Bot will send:
 ⏰ Task "Finish homework" is coming up! (2 hours before the scheduled time)
 
@@ -36,7 +36,7 @@ PostgreSQL – For storing tasks
 📥 Installation
 Clone the repository:
 
-git clone https://github.com/yourusername/todo-bot.git
+git clone https://github.com/Enide131/todo-bot.git
 cd todo-bot
 Install dependencies:
 
